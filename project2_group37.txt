@@ -1,0 +1,704 @@
+==================================================================
+FILE: Makefile
+==================================================================
+# COSC1114 Project 2 - Memory Allocation
+#
+# make or make all : builds firstfit, bestfit and quickfit
+# make clean       : gets rid of object and executable files
+
+CXX = g++
+CXXFLAGS = -Wall -Werror -g
+
+all: firstfit bestfit quickfit
+
+firstfit: main.o mem_common.o firstfit.o
+	$(CXX) $(CXXFLAGS) -o firstfit main.o mem_common.o firstfit.o
+
+bestfit: main.o mem_common.o bestfit.o
+	$(CXX) $(CXXFLAGS) -o bestfit main.o mem_common.o bestfit.o
+
+quickfit: main.o mem_common.o quickfit.o
+	$(CXX) $(CXXFLAGS) -o quickfit main.o mem_common.o quickfit.o
+
+main.o: main.cpp allocator.h mem_common.h
+	$(CXX) $(CXXFLAGS) -c main.cpp
+
+mem_common.o: mem_common.cpp mem_common.h allocator.h
+	$(CXX) $(CXXFLAGS) -c mem_common.cpp
+
+firstfit.o: firstfit.cpp allocator.h mem_common.h
+	$(CXX) $(CXXFLAGS) -c firstfit.cpp
+
+bestfit.o: bestfit.cpp allocator.h mem_common.h
+	$(CXX) $(CXXFLAGS) -c bestfit.cpp
+
+quickfit.o: quickfit.cpp allocator.h mem_common.h
+	$(CXX) $(CXXFLAGS) -c quickfit.cpp
+
+clean:
+	rm -f *.o firstfit bestfit quickfit
+
+.PHONY: all clean
+
+==================================================================
+FILE: allocator.h
+==================================================================
+/*
+ * allocator.h
+ *
+ * COSC1114 Operating Systems Principles - Project 2: Memory Allocation
+ *
+ * The functions that every allocation strategy (first fit, best fit and
+ * quick fit) provides. Each strategy is in its own .cpp file. The main
+ * program (main.cpp) is compiled with one strategy file to make each program.
+ */
+#ifndef ALLOCATOR_H
+#define ALLOCATOR_H
+
+#include <cstddef>
+
+/*
+ * The accounting information kept for each chunk of memory.
+ * Memory is allocated in fixed partitions, so a chunk is always one of the
+ * partition sizes (32, 64, 128, 256 or 512 bytes). The difference between
+ * size and used is the internal fragmentation of the chunk: memory that is
+ * internal to the partition but not being used.
+ */
+struct allocation {
+    std::size_t size;   // total size of the chunk (the partition size)
+    std::size_t used;   // number of bytes the caller asked for (0 when free)
+    void *space;        // start of the chunk, allocated using sbrk()
+};
+
+/*
+ * Allocate a chunk that can hold chunk_size bytes.
+ * Looks in the free list first, and grows the heap with sbrk() if no
+ * suitable free chunk is found.
+ *
+ *   returns: pointer to the chunk, or NULL if chunk_size is 0 or is larger
+ *            than the largest partition (512 bytes)
+ */
+void *alloc(std::size_t chunk_size);
+
+/*
+ * Free a chunk that was allocated with alloc().
+ * The chunk is moved from the allocated list to the end of the free list.
+ * It is a fatal error if the chunk is not in the allocated list.
+ */
+void dealloc(void *chunk);
+
+// prints the name of the allocation strategy
+void print_strategy();
+
+// prints the allocated list and the free list(s)
+void print_lists();
+
+// deletes the allocation structs at the end of the program
+void cleanup();
+
+#endif // ALLOCATOR_H
+
+==================================================================
+FILE: mem_common.h
+==================================================================
+/*
+ * mem_common.h
+ *
+ * Helper functions that are shared by all three allocation strategies.
+ */
+#ifndef MEM_COMMON_H
+#define MEM_COMMON_H
+
+#include <cstddef>
+#include <list>
+#include <string>
+
+#include "allocator.h"
+
+// the fixed partition sizes
+#define NUM_PARTITIONS  5
+#define MAX_PARTITION   512
+
+// a linked list of chunks - each allocation is stored as its own pointer
+typedef std::list<allocation*> ChunkList;
+
+// the partition sizes in increasing order: 32, 64, 128, 256, 512
+extern const std::size_t PARTITION_SIZES[NUM_PARTITIONS];
+
+/* Error handling function: prints out error message and exits */
+void print_error(std::string msg);
+
+/*
+ * Rounds a request up to the smallest partition size that can hold it
+ * (with fixed partitions, a request is allocated the smallest partition
+ * that is big enough).
+ *   returns: the partition size, or 0 if the request is 0 or too big
+ */
+std::size_t get_partition_size(std::size_t chunk_size);
+
+/*
+ * Finds which partition (0 to NUM_PARTITIONS - 1) a partition size is.
+ *   returns: the index, or -1 if size is not a partition size
+ */
+int get_partition_index(std::size_t size);
+
+/*
+ * Creates a new chunk by growing the heap using sbrk().
+ *   returns: pointer to a new allocation struct for the chunk
+ */
+allocation *new_chunk(std::size_t size);
+
+// total number of bytes requested from the OS using sbrk()
+std::size_t get_heap_total();
+
+/*
+ * Adds up the internal fragmentation of the chunks in an allocated list.
+ *   returns: total bytes that are inside a partition but not being used
+ */
+std::size_t get_internal_fragmentation(ChunkList &list);
+
+// prints the address, used size and chunk size of each chunk in a list
+// (the used size of a free chunk is 0)
+void print_list(ChunkList &list);
+
+// deletes all of the allocation structs in a list
+void delete_list(ChunkList &list);
+
+#endif // MEM_COMMON_H
+
+==================================================================
+FILE: mem_common.cpp
+==================================================================
+/*
+ * mem_common.cpp
+ *
+ * Helper functions that are shared by all three allocation strategies.
+ */
+#include <iostream>
+#include <cstdlib>
+#include <unistd.h>
+
+#include "mem_common.h"
+
+using std::cout;
+using std::cerr;
+using std::endl;
+
+const std::size_t PARTITION_SIZES[NUM_PARTITIONS] = {32, 64, 128, 256, 512};
+
+// total number of bytes requested from the OS using sbrk()
+std::size_t heap_total = 0;
+
+/* Error handling function: prints out error message and exits */
+void print_error(std::string msg) {
+    cerr << msg << endl;
+    exit(EXIT_FAILURE);
+}
+
+std::size_t get_partition_size(std::size_t chunk_size) {
+    if (chunk_size == 0) {
+        return 0;
+    }
+
+    for (int i = 0; i < NUM_PARTITIONS; i++) {
+        if (chunk_size <= PARTITION_SIZES[i]) {
+            return PARTITION_SIZES[i];
+        }
+    }
+
+    // bigger than the largest partition
+    return 0;
+}
+
+int get_partition_index(std::size_t size) {
+    for (int i = 0; i < NUM_PARTITIONS; i++) {
+        if (PARTITION_SIZES[i] == size) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+allocation *new_chunk(std::size_t size) {
+    // sbrk() moves the program break to grow the heap. It returns the old
+    // program break, which is the start of the new memory, or (void*) -1
+    // if the heap could not be grown.
+    // The address is a logical (virtual) address. The OS only gives the
+    // page a physical frame when it is first used (demand paging).
+    void *space = sbrk(size);
+    if (space == (void*) -1) {
+        print_error("ERROR: sbrk failed");
+    }
+    heap_total = heap_total + size;
+
+    allocation *chunk = new allocation;
+    chunk->size = size;
+    chunk->used = 0;
+    chunk->space = space;
+    return chunk;
+}
+
+std::size_t get_heap_total() {
+    return heap_total;
+}
+
+std::size_t get_internal_fragmentation(ChunkList &list) {
+    std::size_t total = 0;
+
+    ChunkList::iterator it;
+    for (it = list.begin(); it != list.end(); it++) {
+        // memory inside the partition that was not asked for
+        total = total + ((*it)->size - (*it)->used);
+    }
+    return total;
+}
+
+// prints one chunk on a line: address, used size and chunk size
+void print_chunk(allocation *chunk) {
+    cout << chunk->space << "\t\t" << chunk->used << "\t\t"
+         << chunk->size << endl;
+}
+
+void print_list(ChunkList &list) {
+    cout << "Address\t\t\tUsed Size\tChunk Size" << endl;
+
+    ChunkList::iterator it;
+    for (it = list.begin(); it != list.end(); it++) {
+        print_chunk(*it);
+    }
+    cout << endl;
+}
+
+void delete_list(ChunkList &list) {
+    ChunkList::iterator it;
+    for (it = list.begin(); it != list.end(); it++) {
+        delete *it;
+    }
+    list.clear();
+}
+
+==================================================================
+FILE: firstfit.cpp
+==================================================================
+/*
+ * firstfit.cpp
+ *
+ * First fit allocation strategy.
+ *
+ * Two linked lists are used to manage memory: a list of occupied chunks
+ * and a list of free chunks (the holes). alloc() allocates the first hole
+ * in the free list that is big enough.
+ *
+ * First fit is fast because it stops searching as soon as a hole is found,
+ * but the hole can be much bigger than what is needed, which gives more
+ * internal fragmentation.
+ */
+#include <iostream>
+#include <list>
+
+#include "allocator.h"
+#include "mem_common.h"
+
+using std::cout;
+using std::endl;
+
+// these are only used by the functions in this file
+ChunkList allocated_list;   // the occupied chunks
+ChunkList free_list;        // the free chunks
+
+void *alloc(std::size_t chunk_size) {
+    std::size_t size = get_partition_size(chunk_size);
+    if (size == 0) {
+        return NULL;
+    }
+
+    allocation *chunk = NULL;
+
+    // first fit: allocate the first hole that is big enough
+    ChunkList::iterator it = free_list.begin();
+    while (chunk == NULL && it != free_list.end()) {
+        if ((*it)->size >= size) {
+            chunk = *it;
+            free_list.erase(it);
+        }
+        else {
+            it++;
+        }
+    }
+
+    // no hole is big enough, so ask the OS for more memory
+    if (chunk == NULL) {
+        chunk = new_chunk(size);
+    }
+
+    chunk->used = chunk_size;
+    allocated_list.push_back(chunk);
+    return chunk->space;
+}
+
+void dealloc(void *chunk) {
+    // search for the pointer in the allocated list
+    ChunkList::iterator it;
+    for (it = allocated_list.begin(); it != allocated_list.end(); it++) {
+        if ((*it)->space == chunk) {
+            allocation *found = *it;
+            found->used = 0;
+
+            // move it to the end of the free list
+            allocated_list.erase(it);
+            free_list.push_back(found);
+            return;
+        }
+    }
+
+    // can't free memory that was never allocated
+    print_error("ERROR: dealloc called on a chunk that was not allocated");
+}
+
+void print_strategy() {
+    cout << "First fit memory allocation" << endl;
+}
+
+void print_lists() {
+    cout << "- Allocated Chunks -" << endl;
+    print_list(allocated_list);
+    cout << "Internal fragmentation: "
+         << get_internal_fragmentation(allocated_list) << " bytes" << endl;
+    cout << endl;
+
+    cout << "- Free Chunks -" << endl;
+    print_list(free_list);
+}
+
+void cleanup() {
+    delete_list(allocated_list);
+    delete_list(free_list);
+}
+
+==================================================================
+FILE: bestfit.cpp
+==================================================================
+/*
+ * bestfit.cpp
+ *
+ * Best fit allocation strategy.
+ *
+ * Two linked lists are used to manage memory: a list of occupied chunks
+ * and a list of free chunks (the holes). alloc() allocates the smallest
+ * hole in the free list that is big enough.
+ *
+ * Best fit must search the entire free list, so it is slower than first
+ * fit, but it produces the smallest leftover space in the chunk (the least
+ * internal fragmentation).
+ */
+#include <iostream>
+#include <list>
+
+#include "allocator.h"
+#include "mem_common.h"
+
+using std::cout;
+using std::endl;
+
+// these are only used by the functions in this file
+ChunkList allocated_list;   // the occupied chunks
+ChunkList free_list;        // the free chunks
+
+void *alloc(std::size_t chunk_size) {
+    std::size_t size = get_partition_size(chunk_size);
+    if (size == 0) {
+        return NULL;
+    }
+
+    // best fit: allocate the smallest hole that is big enough
+    // (must search the entire list, because it is not ordered by size)
+    ChunkList::iterator best = free_list.end();
+    ChunkList::iterator it;
+    for (it = free_list.begin(); it != free_list.end(); it++) {
+        if ((*it)->size >= size) {
+            if (best == free_list.end() || (*it)->size < (*best)->size) {
+                best = it;
+            }
+        }
+    }
+
+    allocation *chunk = NULL;
+    if (best != free_list.end()) {
+        chunk = *best;
+        free_list.erase(best);
+    }
+    else {
+        // no hole is big enough, so ask the OS for more memory
+        chunk = new_chunk(size);
+    }
+
+    chunk->used = chunk_size;
+    allocated_list.push_back(chunk);
+    return chunk->space;
+}
+
+void dealloc(void *chunk) {
+    // search for the pointer in the allocated list
+    ChunkList::iterator it;
+    for (it = allocated_list.begin(); it != allocated_list.end(); it++) {
+        if ((*it)->space == chunk) {
+            allocation *found = *it;
+            found->used = 0;
+
+            // move it to the end of the free list
+            allocated_list.erase(it);
+            free_list.push_back(found);
+            return;
+        }
+    }
+
+    // can't free memory that was never allocated
+    print_error("ERROR: dealloc called on a chunk that was not allocated");
+}
+
+void print_strategy() {
+    cout << "Best fit memory allocation" << endl;
+}
+
+void print_lists() {
+    cout << "- Allocated Chunks -" << endl;
+    print_list(allocated_list);
+    cout << "Internal fragmentation: "
+         << get_internal_fragmentation(allocated_list) << " bytes" << endl;
+    cout << endl;
+
+    cout << "- Free Chunks -" << endl;
+    print_list(free_list);
+}
+
+void cleanup() {
+    delete_list(allocated_list);
+    delete_list(free_list);
+}
+
+==================================================================
+FILE: quickfit.cpp
+==================================================================
+/*
+ * quickfit.cpp
+ *
+ * Quick fit allocation strategy.
+ *
+ * Instead of a single free list of different sized chunks, there is a
+ * separate free list for each partition size (32, 64, 128, 256 and 512),
+ * so there are 5 free lists and one allocated list. alloc() goes straight
+ * to the free list for the size that is needed and takes the first chunk.
+ *
+ * With multiple lists of free partitions there is no searching, so quick
+ * fit is very quick and every chunk it reuses is an exact fit for the
+ * partition. First fit and best fit take O(n) in the worst case to find a
+ * free chunk, but quick fit takes O(1).
+ */
+#include <iostream>
+#include <list>
+
+#include "allocator.h"
+#include "mem_common.h"
+
+using std::cout;
+using std::endl;
+
+// these are only used by the functions in this file
+ChunkList allocated_list;               // the occupied chunks
+ChunkList free_lists[NUM_PARTITIONS];   // one free list per partition size
+
+void *alloc(std::size_t chunk_size) {
+    std::size_t size = get_partition_size(chunk_size);
+    if (size == 0) {
+        return NULL;
+    }
+
+    // quick fit: only look in the free list for this partition size
+    int index = get_partition_index(size);
+    allocation *chunk = NULL;
+
+    if (!free_lists[index].empty()) {
+        // every chunk in this list is the right size, so take the first
+        chunk = free_lists[index].front();
+        free_lists[index].pop_front();
+    }
+    else {
+        // no free chunk of this size, so ask the OS for more memory
+        chunk = new_chunk(size);
+    }
+
+    chunk->used = chunk_size;
+    allocated_list.push_back(chunk);
+    return chunk->space;
+}
+
+void dealloc(void *chunk) {
+    // search for the pointer in the allocated list
+    ChunkList::iterator it;
+    for (it = allocated_list.begin(); it != allocated_list.end(); it++) {
+        if ((*it)->space == chunk) {
+            allocation *found = *it;
+            found->used = 0;
+
+            // move it to the end of the free list for its partition size
+            int index = get_partition_index(found->size);
+            allocated_list.erase(it);
+            free_lists[index].push_back(found);
+            return;
+        }
+    }
+
+    // can't free memory that was never allocated
+    print_error("ERROR: dealloc called on a chunk that was not allocated");
+}
+
+void print_strategy() {
+    cout << "Quick fit memory allocation" << endl;
+}
+
+void print_lists() {
+    cout << "- Allocated Chunks -" << endl;
+    print_list(allocated_list);
+    cout << "Internal fragmentation: "
+         << get_internal_fragmentation(allocated_list) << " bytes" << endl;
+    cout << endl;
+
+    // print each of the free lists with the partition size it is for
+    for (int i = 0; i < NUM_PARTITIONS; i++) {
+        cout << "- Free Chunks (partition size " << PARTITION_SIZES[i]
+             << ") -" << endl;
+        print_list(free_lists[i]);
+    }
+}
+
+void cleanup() {
+    delete_list(allocated_list);
+    for (int i = 0; i < NUM_PARTITIONS; i++) {
+        delete_list(free_lists[i]);
+    }
+}
+
+==================================================================
+FILE: main.cpp
+==================================================================
+/*
+ * main.cpp
+ *
+ * The main program for firstfit, bestfit and quickfit. It is compiled with
+ * one of the strategy files, which has the alloc() and dealloc() functions.
+ *
+ * To compile: make
+ *
+ * To run: ./firstfit datafile     (or ./bestfit, ./quickfit)
+ *
+ * The datafile is made by p2_gen.sh and has one call on each line:
+ *   alloc: 100     # allocate a chunk of 100 bytes
+ *   dealloc        # deallocate the last chunk that was allocated (LIFO)
+ */
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <cstdlib>
+#include <cstring>
+
+#include "allocator.h"
+#include "mem_common.h"
+
+#define NUM_ARGS    2
+#define FILL_CHAR   'x'     // written into each chunk to check it is usable
+
+using std::cout;
+using std::cerr;
+using std::endl;
+
+int main(int argc, char *argv[]) {
+    if (argc != NUM_ARGS) {
+        cerr << "usage: " << argv[0] << " datafile" << endl;
+        return EXIT_FAILURE;
+    }
+
+    std::ifstream input(argv[1]);
+    if (!input.is_open()) {
+        cerr << "ERROR: could not open file " << argv[1] << endl;
+        return EXIT_FAILURE;
+    }
+
+    // the chunks that are allocated at the moment, in the order they were
+    // allocated, so the last one can be deallocated first
+    std::vector<void*> chunks;
+
+    int num_allocs = 0;
+    int num_deallocs = 0;
+    int line_num = 0;
+    std::string line;
+
+    // read in the file line-by-line
+    while (std::getline(input, line)) {
+        line_num++;
+
+        std::istringstream iss(line);
+        std::string command;
+        iss >> command;
+
+        if (command == "alloc:") {
+            long chunk_size = 0;
+            iss >> chunk_size;
+
+            // check for bad values
+            if (iss.fail() || chunk_size <= 0 || chunk_size > MAX_PARTITION) {
+                cerr << "line " << line_num << ": invalid alloc size "
+                     << "(must be 1 to " << MAX_PARTITION << "), skipped"
+                     << endl;
+            }
+            else {
+                void *chunk = alloc(chunk_size);
+                if (chunk == NULL) {
+                    cerr << "ERROR: alloc failed" << endl;
+                    cleanup();
+                    return EXIT_FAILURE;
+                }
+
+                // write to the chunk to check the memory can be used
+                // (the first write to a new page causes a page fault and
+                // the OS maps the page to a physical frame)
+                memset(chunk, FILL_CHAR, chunk_size);
+                chunks.push_back(chunk);
+                num_allocs++;
+            }
+        }
+        else if (command == "dealloc") {
+            if (chunks.empty()) {
+                cerr << "line " << line_num
+                     << ": nothing to dealloc, skipped" << endl;
+            }
+            else {
+                // dealloc the last chunk that was allocated
+                dealloc(chunks.back());
+                chunks.pop_back();
+                num_deallocs++;
+            }
+        }
+        else if (command != "") {
+            cerr << "line " << line_num << ": unknown command " << command
+                 << ", skipped" << endl;
+        }
+    }
+
+    input.close();
+
+    // print the results once at the end
+    print_strategy();
+    cout << "alloc calls: " << num_allocs
+         << ", dealloc calls: " << num_deallocs << endl;
+    cout << "total memory requested using sbrk: " << get_heap_total()
+         << " bytes" << endl;
+    cout << endl;
+
+    print_lists();
+
+    cleanup();
+    return EXIT_SUCCESS;
+}
+
