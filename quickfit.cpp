@@ -22,9 +22,9 @@
 using std::cout;
 using std::endl;
 
-// these are only used by the functions in this file
-ChunkList allocated_list;               // the occupied chunks
-ChunkList free_lists[NUM_PARTITIONS];   // one free list per partition size
+// static: these can only be used by the functions in this file
+static ChunkList allocated_list;             // the occupied chunks
+static ChunkList free_lists[NUM_PARTITIONS]; // one free list per partition size
 
 void *alloc(std::size_t chunk_size) {
     std::size_t size = get_partition_size(chunk_size);

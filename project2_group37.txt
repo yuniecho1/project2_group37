@@ -187,7 +187,7 @@ using std::endl;
 const std::size_t PARTITION_SIZES[NUM_PARTITIONS] = {32, 64, 128, 256, 512};
 
 // total number of bytes requested from the OS using sbrk()
-std::size_t heap_total = 0;
+static std::size_t heap_total = 0;
 
 /* Error handling function: prints out error message and exits */
 void print_error(std::string msg) {
@@ -302,9 +302,9 @@ FILE: firstfit.cpp
 using std::cout;
 using std::endl;
 
-// these are only used by the functions in this file
-ChunkList allocated_list;   // the occupied chunks
-ChunkList free_list;        // the free chunks
+// static: these can only be used by the functions in this file
+static ChunkList allocated_list; // the occupied chunks
+static ChunkList free_list; // the free chunks
 
 void *alloc(std::size_t chunk_size) {
     std::size_t size = get_partition_size(chunk_size);
@@ -400,9 +400,9 @@ FILE: bestfit.cpp
 using std::cout;
 using std::endl;
 
-// these are only used by the functions in this file
-ChunkList allocated_list;   // the occupied chunks
-ChunkList free_list;        // the free chunks
+// static: these can only be used by the functions in this file
+static ChunkList allocated_list; // the occupied chunks
+static ChunkList free_list; // the free chunks
 
 void *alloc(std::size_t chunk_size) {
     std::size_t size = get_partition_size(chunk_size);
@@ -503,9 +503,9 @@ FILE: quickfit.cpp
 using std::cout;
 using std::endl;
 
-// these are only used by the functions in this file
-ChunkList allocated_list;               // the occupied chunks
-ChunkList free_lists[NUM_PARTITIONS];   // one free list per partition size
+// static: these can only be used by the functions in this file
+static ChunkList allocated_list;             // the occupied chunks
+static ChunkList free_lists[NUM_PARTITIONS]; // one free list per partition size
 
 void *alloc(std::size_t chunk_size) {
     std::size_t size = get_partition_size(chunk_size);

@@ -16,7 +16,7 @@ using std::endl;
 const std::size_t PARTITION_SIZES[NUM_PARTITIONS] = {32, 64, 128, 256, 512};
 
 // total number of bytes requested from the OS using sbrk()
-std::size_t heap_total = 0;
+static std::size_t heap_total = 0;
 
 /* Error handling function: prints out error message and exits */
 void print_error(std::string msg) {
