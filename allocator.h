@@ -26,19 +26,17 @@ struct allocation {
 };
 
 /*
- * Allocate a chunk that can hold chunk_size bytes.
- * Looks in the free list first, and grows the heap with sbrk() if no
- * suitable free chunk is found.
- *
- *   returns: pointer to the chunk, or NULL if chunk_size is 0 or is larger
- *            than the largest partition (512 bytes)
+ * Allocates a chunk that can hold chunk_size bytes, rounded up to a
+ * partition size. Uses a free chunk if one fits, otherwise grows the heap
+ * with sbrk().
+ *   returns: pointer to the chunk, or NULL if chunk_size is 0 or larger
+ *            than the largest partition
  */
 void *alloc(std::size_t chunk_size);
 
 /*
- * Free a chunk that was allocated with alloc().
- * The chunk is moved from the allocated list to the end of the free list.
- * It is a fatal error if the chunk is not in the allocated list.
+ * Moves a chunk from the allocated list to the end of the free list.
+ * Fatal error (program exits) if the chunk is not in the allocated list.
  */
 void dealloc(void *chunk);
 

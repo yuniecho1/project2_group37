@@ -18,7 +18,6 @@ const std::size_t PARTITION_SIZES[NUM_PARTITIONS] = {32, 64, 128, 256, 512};
 // total number of bytes requested from the OS using sbrk()
 static std::size_t heap_total = 0;
 
-/* Error handling function: prints out error message and exits */
 void print_error(std::string msg) {
     cerr << msg << endl;
     exit(EXIT_FAILURE);
@@ -82,18 +81,26 @@ std::size_t get_internal_fragmentation(ChunkList &list) {
     return total;
 }
 
-// prints one chunk on a line: address, used size and chunk size
-void print_chunk(allocation *chunk) {
-    cout << chunk->space << "\t\t" << chunk->used << "\t\t"
-         << chunk->size << endl;
+// prints one chunk on a line: address, used size (if show_used) and chunk size
+void print_chunk(allocation *chunk, bool show_used) {
+    cout << chunk->space << "\t\t";
+    if (show_used) {
+        cout << chunk->used << "\t\t";
+    }
+    cout << chunk->size << endl;
 }
 
-void print_list(ChunkList &list) {
-    cout << "Address\t\t\tUsed Size\tChunk Size" << endl;
+void print_list(ChunkList &list, bool show_used) {
+    if (show_used) {
+        cout << "Address\t\t\tUsed Size\tChunk Size" << endl;
+    }
+    else {
+        cout << "Address\t\t\tChunk Size" << endl;
+    }
 
     ChunkList::iterator it;
     for (it = list.begin(); it != list.end(); it++) {
-        print_chunk(*it);
+        print_chunk(*it, show_used);
     }
     cout << endl;
 }

@@ -1,16 +1,12 @@
 /*
  * main.cpp
  *
- * The main program for firstfit, bestfit and quickfit. It is compiled with
- * one of the strategy files, which has the alloc() and dealloc() functions.
+ * Usage: ./firstfit datafile   (or ./bestfit, ./quickfit)
  *
- * To compile: make
- *
- * To run: ./firstfit datafile     (or ./bestfit, ./quickfit)
- *
- * The datafile is made by p2_gen.sh and has one call on each line:
- *   alloc: 100     # allocate a chunk of 100 bytes
- *   dealloc        # deallocate the last chunk that was allocated (LIFO)
+ * Runs the calls in a datafile made by p2_gen.sh, one per line:
+ *   alloc: N   allocate N bytes
+ *   dealloc    deallocate the last chunk allocated (LIFO)
+ * then prints the allocated and free lists once at the end.
  */
 #include <iostream>
 #include <fstream>
@@ -42,8 +38,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // the chunks that are allocated at the moment, in the order they were
-    // allocated, so the last one can be deallocated first
+    // currently allocated chunks, most recent last (for LIFO dealloc)
     std::vector<void*> chunks;
 
     int num_allocs = 0;
@@ -51,7 +46,6 @@ int main(int argc, char *argv[]) {
     int line_num = 0;
     std::string line;
 
-    // read in the file line-by-line
     while (std::getline(input, line)) {
         line_num++;
 
@@ -62,9 +56,18 @@ int main(int argc, char *argv[]) {
         if (command == "alloc:") {
             long chunk_size = 0;
             iss >> chunk_size;
+            bool bad_number = iss.fail();
 
-            // check for bad values
-            if (iss.fail() || chunk_size <= 0 || chunk_size > MAX_PARTITION) {
+            // anything left after the number (e.g. "alloc: 12abc") is invalid
+            std::string extra;
+            if (!bad_number && iss >> extra) {
+                bad_number = true;
+            }
+
+            // check for bad values (chunk_size <= 0 is checked first, so the
+            // cast to std::size_t below is safe)
+            if (bad_number || chunk_size <= 0
+                    || (std::size_t) chunk_size > MAX_PARTITION) {
                 cerr << "line " << line_num << ": invalid alloc size "
                      << "(must be 1 to " << MAX_PARTITION << "), skipped"
                      << endl;
@@ -77,9 +80,7 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
 
-                // write to the chunk to check the memory can be used
-                // (the first write to a new page causes a page fault and
-                // the OS maps the page to a physical frame)
+                // write to the chunk to check the memory is usable
                 memset(chunk, FILL_CHAR, chunk_size);
                 chunks.push_back(chunk);
                 num_allocs++;
@@ -101,6 +102,14 @@ int main(int argc, char *argv[]) {
             cerr << "line " << line_num << ": unknown command " << command
                  << ", skipped" << endl;
         }
+    }
+
+    // getline() stops at the end of the file, but bad() means the file
+    // could not be read (e.g. the datafile is a directory)
+    if (input.bad()) {
+        cerr << "ERROR: could not read file " << argv[1] << endl;
+        cleanup();
+        return EXIT_FAILURE;
     }
 
     input.close();
