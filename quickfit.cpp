@@ -1,17 +1,9 @@
 /*
  * quickfit.cpp
  *
- * Quick fit allocation strategy.
- *
- * Instead of a single free list of different sized chunks, there is a
- * separate free list for each partition size (32, 64, 128, 256 and 512),
- * so there are 5 free lists and one allocated list. alloc() goes straight
- * to the free list for the size that is needed and takes the first chunk.
- *
- * With multiple lists of free partitions there is no searching, so quick
- * fit is very quick and every chunk it reuses is an exact fit for the
- * partition. First fit and best fit take O(n) in the worst case to find a
- * free chunk, but quick fit takes O(1).
+ * Quick fit allocation strategy: one free list per partition size (5 in
+ * total). alloc() takes a chunk from the list for the requested partition
+ * size, or grows the heap if that list is empty.
  */
 #include <iostream>
 #include <list>
@@ -42,7 +34,7 @@ void *alloc(std::size_t chunk_size) {
         free_lists[index].pop_front();
     }
     else {
-        // no free chunk of this size, so ask the OS for more memory
+        // no free chunk of this size, so grow the heap
         chunk = new_chunk(size);
     }
 
@@ -77,7 +69,7 @@ void print_strategy() {
 
 void print_lists() {
     cout << "- Allocated Chunks -" << endl;
-    print_list(allocated_list);
+    print_list(allocated_list, true);
     cout << "Internal fragmentation: "
          << get_internal_fragmentation(allocated_list) << " bytes" << endl;
     cout << endl;
@@ -86,7 +78,7 @@ void print_lists() {
     for (int i = 0; i < NUM_PARTITIONS; i++) {
         cout << "- Free Chunks (partition size " << PARTITION_SIZES[i]
              << ") -" << endl;
-        print_list(free_lists[i]);
+        print_list(free_lists[i], false);
     }
 }
 

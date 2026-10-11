@@ -32,7 +32,7 @@ void *alloc(std::size_t chunk_size) {
 
     allocation *chunk = NULL;
 
-    // first fit: allocate the first hole that is big enough
+    // first fit: take the first free chunk that is big enough
     ChunkList::iterator it = free_list.begin();
     while (chunk == NULL && it != free_list.end()) {
         if ((*it)->size >= size) {
@@ -44,7 +44,7 @@ void *alloc(std::size_t chunk_size) {
         }
     }
 
-    // no hole is big enough, so ask the OS for more memory
+    // no free chunk is big enough, so grow the heap
     if (chunk == NULL) {
         chunk = new_chunk(size);
     }
@@ -79,13 +79,13 @@ void print_strategy() {
 
 void print_lists() {
     cout << "- Allocated Chunks -" << endl;
-    print_list(allocated_list);
+    print_list(allocated_list, true);
     cout << "Internal fragmentation: "
          << get_internal_fragmentation(allocated_list) << " bytes" << endl;
     cout << endl;
 
     cout << "- Free Chunks -" << endl;
-    print_list(free_list);
+    print_list(free_list, false);
 }
 
 void cleanup() {
