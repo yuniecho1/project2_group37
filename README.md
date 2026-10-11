@@ -120,7 +120,8 @@ last chunk allocated (LIFO) because that is what the datafile means by
 ### Output
 
 The lists are printed once at the end of the program, using the layout of the
-sample in the project FAQ (address, used size and chunk size of each chunk):
+sample in the project FAQ (address, used size and chunk size of each allocated
+chunk, and address and chunk size of each free chunk):
 
 ```
 First fit memory allocation
@@ -136,12 +137,12 @@ Address                 Used Size       Chunk Size
 Internal fragmentation: 256 bytes
 
 - Free Chunks -
-Address                 Used Size       Chunk Size
-0x562925585280          0               32
+Address                 Chunk Size
+0x562925585280          32
 ```
 
 The internal fragmentation is the total of (chunk size - used size) for the
-allocated chunks. The used size of a free chunk is 0. For quick fit, each of the five free lists
+allocated chunks. For quick fit, each of the five free lists
 is printed with the partition size it is for, e.g.
 `- Free Chunks (partition size 32) -`.
 
@@ -152,8 +153,10 @@ from the lists by `alloc` and `dealloc`.
 
 * Wrong number of arguments: prints a usage message and exits.
 * The datafile cannot be opened: prints an error and exits.
+* The datafile cannot be read (e.g. it is a directory): prints an error and
+  exits.
 * A line in the datafile that is not `alloc: N` or `dealloc`, an alloc size
-  that is not 1 to 512, or a `dealloc` when nothing is allocated: prints a
+  that is not 1 to 512 or has extra characters after it (e.g. `alloc: 12abc`), or a `dealloc` when nothing is allocated: prints a
   message with the line number and skips the line.
 * `sbrk()` fails, or `dealloc` is given a pointer that was not allocated:
   prints an error and exits.
